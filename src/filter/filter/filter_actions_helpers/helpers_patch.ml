@@ -201,6 +201,22 @@ let is_object_class_key attributes =
         | _ -> (false)
       end
 
+let is_existing_object_class_key sessionh objecth =
+  (* Get the CKA_CLASS attributes *)
+  let cka_class_template = [| {Pkcs11.type_ = Pkcs11.cKA_CLASS; Pkcs11.value = [||]} |] in
+  let (ret, attributes) = Backend.c_GetAttributeValue sessionh objecth cka_class_template in
+  if compare ret Pkcs11.cKR_OK = 0 then
+    let (ret, attributes) = Backend.c_GetAttributeValue sessionh objecth attributes in    
+    if compare ret Pkcs11.cKR_OK = 0 then
+      (* We have got the class, now check it *)
+      (is_object_class_key attributes)
+    else
+      (* GetAttributeValue returned an error, fail with an exception *)
+      let s = "[User defined extensions] C_GettAttributeValue CRITICAL ERROR when getting CKA_CLASS (this should not happen ...)\n" in netplex_log_critical s; failwith s
+  else
+    (* GetAttributeValue returned an error, fail with an exception *)
+    let s = "[User defined extensions] C_GettAttributeValue CRITICAL ERROR when getting CKA_CLASS (this should not happen ...)\n" in netplex_log_critical s; failwith s
+
 (* Check if two templates are compatible regarding their defined attributes *)
 let check_are_templates_nonconforming fun_name attributes new_attributes =
   let check = Array.fold_left (
@@ -224,7 +240,7 @@ let check_is_attribute_set fun_name the_attr attributes =
   let check = Array.fold_left (
     fun check_tmp attr ->
       if (compare attr.Pkcs11.type_ the_attr = 0) &&                  
-         (compare attr.Pkcs11.value (Pkcs11.bool_to_char_array Pkcs11.cK_FALSE) = 0) then
+         (compare attr.Pkcs11.value (Pkcs11.bool_to_char_array Pkcs11.cK_TRUE) = 0) then
         (check_tmp || true)
       else
         (check_tmp || false)
@@ -277,3 +293,32 @@ let detect_sticky_attributes fun_name attributes new_attributes the_sticky_attri
   ) false attributes in
   (check)
 
+let execute_external_command command data argvs env =
+  let buffer_size = 2048 in
+  let buffer_stdout = Buffer.create buffer_size in
+  let buffer_stderr = Buffer.create buffer_size in
+  (* Append the argvs to the command *)
+  let command = String.concat " " (List.concat [ [command]; Array.to_list argvs ]) in
+  let string = String.create buffer_size in
+  let (in_channel_stdout, out_channel, in_channel_stderr) = Unix.open_process_full command [||] in
+  (* Write data to out_channel *)
+  output out_channel data 0 (String.length data);
+  (* Close out_channel to tell it's over *)
+  flush out_channel;
+  close_out out_channel;
+  (* Read result data on the in_channel stdout *)
+  let chars_read_stdout = ref 1 in
+  while !chars_read_stdout <> 0 do
+    chars_read_stdout := input in_channel_stdout string 0 buffer_size;
+    Buffer.add_substring buffer_stdout string 0 !chars_read_stdout
+  done;
+  (* Command done, read stderr *)
+  let chars_read_stderr = ref 1 in
+  while !chars_read_stderr <> 0 do
+    chars_read_stderr := input in_channel_stderr string 0 buffer_size;
+    Buffer.add_substring buffer_stderr string 0 !chars_read_stderr
+  done;
+  let ret_status = Unix.close_process_full (in_channel_stdout, out_channel, in_channel_stderr) in
+  match ret_status with
+    Unix.WEXITED(0) -> (true, Buffer.contents buffer_stdout, Buffer.contents buffer_stderr)
+   | _ -> (false, "", Buffer.contents buffer_stderr)

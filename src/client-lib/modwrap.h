@@ -155,9 +155,9 @@
       /* buffer size is enough, copy back and remove item from list */\
       DEBUG_CALL(operation_type, "Buffer given is big enough, let's copy data back\n");\
       memcpy(output2, elem->out, elem->out_len);\
+      *output2_len = elem->out_len;\
       remove_elements_from_filtering_list(input0, operation_cst, input1,\
                                           input1_len);\
-      *output2_len = elem->out_len;\
       Return(CKR_OK);\
     }\
   }\
@@ -304,7 +304,9 @@ int purge_gnutls(void);
 void print_info(gnutls_session_t gsession);
 
 /* Global variables for GNU_TLS */
+unsigned char gnutls_global_session_allocated;
 gnutls_session_t gnutls_global_session;
+unsigned char xcred_allocated;
 gnutls_certificate_credentials_t xcred;
 #endif
 
@@ -323,6 +325,10 @@ SSL *ssl;
 /* Environment variable holding the library alias name to override */
 /* the default built-in one                                        */
 #define ENV_LIBNAME "PKCS11PROXY_LIBNAME"
+
+#define RPC_DEFAULT_TIMEOUT 25UL
+/* Environment variable to override default RPC_TIMEOUT */
+#define ENV_RPC_TIMEOUT "PKCS11PROXY_RPC_TIMEOUT"
 
 /* --------- PKCS#11 useful defines - */
 #define CKR_OK                          (0UL)

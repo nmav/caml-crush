@@ -211,6 +211,7 @@ Use --with-socket to configure the client socket.
   * --with-socket=tcp,127.0.0.1:4444
     * (client will establish a TCP socket with remote peer 127.0.0.1 and port 4444)
 
+
 ### Enable SSL/TLS support
 Use --with-ssl to enable the SSL/TLS code (OpenSSL by default, can use --with-gnutls).
 
@@ -223,7 +224,7 @@ The client can be compiled to use three modes, file lookup, environement variabl
     * (client will load files with given path at runtime)
 
   * --with-ssl-clientfiles='env'
-    * (client will lookup the following environement variables PKCS11PROXY\_SSL\_CA, PKCS11PROXY\_SSL\_CERT and PKCS11\_SSL\_PRIVKEY)
+    * (client will lookup the following environement variables PKCS11PROXY\_CA\_FILE, PKCS11PROXY\_CERT\_FILE and PKCS11\_PRIVKEY\_FILE)
 
   * --with-ssl-clientfiles='embed;ca=path-to-ca,cert=path-to-cert,privkey=path-to-key'
     * (the files will be parsed and embedded within the compiled code through C headers)
@@ -309,14 +310,17 @@ processor {
 ...
 ```
 
+Please note that the current implementation expects PEM files and that
+the private key has to be un-encrypted.
+
 The cipher\_suite parameter accepts the classic OpenSSL "colon" separated cipher list.
 Please note that the following ciphers are explicitely turned off:
 
     !aNULL:!eNULL:!EXPORT:!DES:!3DES:!MD5:!PSK:!RC4
 
 
-**WARNING**: As of today, the [ocaml-ssl][] (0.4.6) bindings is ONLY capable of using TLS 1.0 and cannot provide PFS.
-If you care about PFS, please read the dedicated section in [ISSUES](../ISSUES.md).
+**WARNING**: The [ocaml-ssl][] (0.4.6) bindings is ONLY capable of using TLS 1.0 and cannot provide PFS.
+If you care about PFS, please use ocaml-ssl (0.4.7) and read the dedicated section in [ISSUES](../ISSUES.md).
 [ocaml-ssl]: https://github.com/savonet/ocaml-ssl/
 
 ### Server PKCS#11 module support configuration (when filtering is DISABLED)
@@ -388,6 +392,19 @@ For instance, you could use "pkcs11-tool" from the [OpenSC][] suite to query slo
     pkcs11-tool --module ./libp11clientopensc.so -L
 
 [OpenSC]: https://www.opensc-project.org/opensc/
+
+### Client RPC timeout
+Each RPC operation has a timeout that is set up (25 seconds by default).
+If a **slow** cryptographic operation is performed, it is likely that the RPC layer
+will abort due to the timeout. Although on the server-side the operation will
+complete, the client application will catch the following example error:
+
+    Error RPC with C_GenerateKeyPair
+    error: PKCS11 function C_GenerateKeyPair failed: rv = unknown PKCS11 error (0xffffffff)
+
+To provide some more flexibility we introduced an environment variable that can
+be used to control the timeout value. Therefore, one can use PKCS11PROXY\_RPC\_TIMEOUT
+to configure a custom timeout setting.
 
 ## Hardening of the server <a name="Harden"></a>
 

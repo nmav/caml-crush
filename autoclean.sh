@@ -19,14 +19,16 @@ clean_dirs=($main_dir $bindings_dir $rpc_dir $server_dir $client_dir $filter_dir
 echo "Cleaning the project ..."
 make clean &> /dev/null
 echo "Cleaning AUTOCONF files ..."
-rm -rf autom4te.cache config.log config.status configure 
+rm -rf autom4te.cache config.log config.status configure summary
 echo "Cleaning Makefiles ..."
 for (( i = 0 ; i < ${#clean_dirs[*]} ; i++ ))
 do
   rm -f ${clean_dirs[i]}/Makefile
 done
 rm -f ${bindings_dir}/Makefile.standalone
+#Cleaning Makefile.in which will be cp depending on platform
+rm -f ${main_dir}/Makefile.in
 echo "Cleaning initrc file ..."
 rm -rf ${scripts_dir}/pkcs11proxyd
 echo "Cleaning the SSL related files ..."
-rm -f create_ssl_files.c create_ssl_files src/client-lib/cert_file.h src/client-lib/ca_file.h src/client-lib/private_key_file.h src/rpc-pkcs11/ca_file.inc src/rpc-pkcs11/cert_file.inc src/rpc-pkcs11/private_key_file.inc
+rm -f create_ssl_files.c create_ssl_files src/client-lib/cert_file.h src/client-lib/ca_file.h src/client-lib/private_key_file.h src/rpc-pkcs11/ca_file.inc src/rpc-pkcs11/cert_file.inc src/rpc-pkcs11/private_key_file.inc server_certs.crt

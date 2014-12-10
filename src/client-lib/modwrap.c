@@ -323,6 +323,9 @@ p11_request_struct *check_operation_active_in_filtering_list(ck_session_handle_t
 
 void custom_sanitize_ck_mechanism(struct ck_mechanism *mech)
 {
+  /* FIXME: We only sanitize the most commonly used mechanisms.
+   * This should also be done for other mechs that do not require params.
+   */
   switch ((*mech).mechanism) {
   case CKM_RSA_PKCS:
   case CKM_RSA_9796:
@@ -332,19 +335,14 @@ void custom_sanitize_ck_mechanism(struct ck_mechanism *mech)
   case CKM_SHA1_RSA_PKCS:
   case CKM_RIPEMD128_RSA_PKCS:
   case CKM_RIPEMD160_RSA_PKCS:
-  case CKM_RSA_PKCS_OAEP:
   case CKM_RSA_X9_31:
   case CKM_SHA1_RSA_X9_31:
-  case CKM_RSA_PKCS_PSS:
-  case CKM_SHA1_RSA_PKCS_PSS:
   case CKM_DSA:
   case CKM_DSA_SHA1:
   case CKM_SHA256_RSA_PKCS:
   case CKM_SHA384_RSA_PKCS:
   case CKM_SHA512_RSA_PKCS:
-  case CKM_SHA256_RSA_PKCS_PSS:
-  case CKM_SHA384_RSA_PKCS_PSS:
-  case CKM_SHA512_RSA_PKCS_PSS:
+  case CKM_SHA224_RSA_PKCS:
     {
       (*mech).parameter = NULL;
       (*mech).parameter_len = 0;
@@ -363,6 +361,94 @@ void custom_sanitize_ck_mechanism(struct ck_mechanism *mech)
   }
 }
 
+/* Functions when LIBNAME is read from a file */
+#ifdef LIBNAME_FILE
+/* Portable getline() function */
+size_t mygetline(char *lineptr, FILE *stream) {
+  char *p = lineptr;
+  int c;
+
+  if (lineptr == NULL) {
+    fprintf(stderr, "mygetline: lineptr is NULL\n");
+    return -1;
+  }
+  if (stream == NULL) {
+    fprintf(stderr, "mygetline: stream is NULL\n");
+    return -1;
+  }
+  c = fgetc(stream);
+  if (c == EOF) {
+    return -1;
+  }
+  while(c != EOF) {
+    if ((p - lineptr) > (MAX_LIBNAME_LEN - 1)) {
+      fprintf(stderr, "mygetline: line is > to %d\n", MAX_LIBNAME_LEN);
+      return -2;
+    }
+    *p++ = c;
+    c = fgetc(stream);
+    if (c == '\n') {
+      break;
+    }
+  }
+  *p++ = '\0';
+  return p - lineptr - 1;
+}
+
+/* Function that returns the parsed LIBNAME from a file
+ * the file is located in $HOME/.camlcrushlibname, caller has
+ * to free the passed libname parameter.
+ */
+int get_libname_from_file(char *libname){
+    int   count;
+    char *home;
+    size_t home_len = 0;
+    char *file_path;
+    size_t file_path_len = 0;
+    FILE *file;
+
+    home = getenv("HOME");
+    if(!home){
+        fprintf(stderr, "get_libname_from_file: HOME variable not found\n");
+        return -1;
+    }
+    home_len = strnlen(home, MAX_ENV_LEN);
+
+	file_path_len = home_len + strlen(LIBNAME_FILE_NAME) + 2;
+    file_path = custom_malloc(file_path_len);
+    if(!file_path){
+        fprintf(stderr, "get_libname_from_file: malloc failed\n");
+        return -1;
+    }
+	memset(file_path, 0, file_path_len);
+
+    strncat(file_path, home, home_len);
+    strncat(file_path+home_len, "/", 1);
+    strncat(file_path+home_len+1, LIBNAME_FILE_NAME, strlen(LIBNAME_FILE_NAME));
+
+    file = fopen(file_path, "r");
+    if(!file){
+        fprintf(stderr,
+				"get_libname_from_file: open failed for file %s\n",file_path);
+        return -1;
+    }
+
+    count = mygetline(libname, file);
+    if(count < 0){
+        fprintf(stderr, "get_libname_from_file: LIBNAME could not be read\n");
+        return -1;
+    }
+    fclose(file);
+    custom_free((void**)&file_path);
+    return 0;
+}
+#endif /* LIBNAME_FILE */
+
+/* Keep the pid of current process */
+#ifndef WIN32
+pid_t local_pid = 0;
+#endif
+
 /* Init function is called when loading library */
 #ifndef WIN32
 __attribute__ ((constructor))
@@ -372,6 +458,14 @@ void init()
   ck_rv_t ret;
   /* libname override through environment variable */
   char *libname;
+#ifdef LIBNAME_FILE
+  char libname_file[32] = {0};
+#endif
+
+  /* Store the PID to match it in case of a fork */
+#ifndef WIN32
+  local_pid = getpid();
+#endif
 
   /* Initialize global variables */
   pthread_mutex_init(&mutex, NULL);
@@ -397,16 +491,25 @@ void init()
 #endif
   }
   else{
+#ifdef LIBNAME_FILE
+    /* Find the LIBNAME in a file */
+	if(get_libname_from_file(libname_file) != 0){
+		fprintf(stderr, "Init failed, could not find a LIBNAME EXITING\n");
+		exit(-1);
+	}
+#ifdef CAMLRPC
+    ret = init_ml(libname_file);
+#else
+    ret = init_c(libname_file);
+#endif
+#else
     /* Use the default built-in libname */
 #ifdef CAMLRPC
     ret = init_ml(xstr(LIBNAME));
 #else
     ret = init_c(xstr(LIBNAME));
 #endif
-  }
-  if (ret != CKR_OK) {
-    fprintf(stderr, "Init failed, EXITING\n");
-    return;
+#endif /* LIBNAME_FILE */
   }
 
   /* Did we manage to detect arch ? */
@@ -416,16 +519,22 @@ void init()
   }
 
   if (ret != CKR_OK) {
-#ifdef DEBUG
-#ifdef CAMLRPC
+	if(libname != NULL){
+      fprintf(stderr,
+		"C_LoadModule: failed loading PKCS#11 module %s (read from env)\n",
+		libname);
+	}
+	else{
+#ifdef LIBNAME_FILE
     fprintf(stderr,
-	    "C_LoadModule: failed loading PKCS#11 module %s from CAML\n",
-	    xstr(LIBNAME));
+	    "C_LoadModule: failed loading PKCS#11 module %s (read from file)\n",
+	    libname_file);
 #else
-    fprintf(stderr, "C_LoadModule: failed loading PKCS#11 module %s from C\n",
+    fprintf(stderr, "C_LoadModule: failed loading PKCS#11 module %s (builtin)\n",
 	    xstr(LIBNAME));
 #endif
-#endif
+	}
+    fprintf(stderr, "Init failed, EXITING\n");
     exit(-1);
   }
   return;
@@ -543,6 +652,7 @@ ck_rv_t C_Initialize(void *init_args)
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_Initialize(init_args);
 #else
@@ -556,6 +666,7 @@ ck_rv_t C_Finalize(void *init_args)
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_Finalize(init_args);
 #else
@@ -576,6 +687,7 @@ C_GetSlotList(CK_BBOOL input0, ck_slot_id_t * output2, unsigned long *output3)
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_GetSlotList(input0, output2, output3);
 #else
@@ -589,6 +701,7 @@ ck_rv_t C_GetInfo(struct ck_info * output0)
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_GetInfo(output0);
 #else
@@ -603,6 +716,7 @@ C_WaitForSlotEvent(ck_flags_t input0, ck_slot_id_t * output1, void *reserved)
 {
   ck_rv_t ret;
 
+  check_pid;
   if (input0 == CKF_DONT_BLOCK) {
 #ifdef DEBUG
     fprintf(stderr, "\nC_WaitForSlotEvent called with non block\n");
@@ -667,6 +781,7 @@ ck_rv_t C_GetSlotInfo(ck_slot_id_t input0, struct ck_slot_info * output1)
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_GetSlotInfo(input0, output1);
 #else
@@ -680,6 +795,7 @@ ck_rv_t C_GetTokenInfo(ck_slot_id_t input0, struct ck_token_info * output1)
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_GetTokenInfo(input0, output1);
 #else
@@ -695,6 +811,7 @@ C_InitToken(ck_slot_id_t input0, unsigned char *input1,
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_InitToken(input0, input1, input1_len, input2);
 #else
@@ -710,6 +827,7 @@ C_OpenSession(ck_slot_id_t input0, ck_flags_t input1, void *application,
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_OpenSession(input0, input1, application, notify, output2);
 #else
@@ -723,6 +841,7 @@ ck_rv_t C_CloseSession(ck_session_handle_t input0)
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_CloseSession(input0);
 #else
@@ -736,6 +855,7 @@ ck_rv_t C_CloseAllSessions(ck_slot_id_t input0)
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_CloseAllSessions(input0);
 #else
@@ -750,6 +870,7 @@ C_GetSessionInfo(ck_session_handle_t input0, struct ck_session_info * output1)
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_GetSessionInfo(input0, output1);
 #else
@@ -765,6 +886,7 @@ C_Login(ck_session_handle_t input0, ck_user_type_t input1,
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_Login(input0, input1, input2, input2_len);
 #else
@@ -778,6 +900,7 @@ ck_rv_t C_Logout(ck_session_handle_t input0)
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_Logout(input0);
 #else
@@ -793,6 +916,7 @@ C_GetMechanismList(ck_slot_id_t input0, ck_mechanism_type_t * output2,
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_GetMechanismList(input0, output2, output3);
 #else
@@ -808,6 +932,7 @@ C_GetMechanismInfo(ck_slot_id_t input0, ck_mechanism_type_t input1,
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_GetMechanismInfo(input0, input1, output2);
 #else
@@ -823,6 +948,7 @@ C_InitPIN(ck_session_handle_t input0, unsigned char *input1,
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_InitPIN(input0, input1, input1_len);
 #else
@@ -839,6 +965,7 @@ C_SetPIN(ck_session_handle_t input0, unsigned char *input1,
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_SetPIN(input0, input1, input1_len, input2, input2_len);
 #else
@@ -854,6 +981,7 @@ C_SeedRandom(ck_session_handle_t input0, unsigned char *input1,
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_SeedRandom(input0, input1, input1_len);
 #else
@@ -869,6 +997,7 @@ C_GenerateRandom(ck_session_handle_t input0, unsigned char *output2,
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_GenerateRandom(input0, output2, output2_len);
 #else
@@ -884,6 +1013,7 @@ C_GetOperationState(ck_session_handle_t input0, unsigned char *output1,
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_GetOperationState(input0, output1, output1_len);
 #else
@@ -900,6 +1030,7 @@ C_SetOperationState(ck_session_handle_t input0, unsigned char *input1,
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_SetOperationState(input0, input1, input1_len, input2, input3);
 #else
@@ -915,6 +1046,7 @@ C_FindObjectsInit(ck_session_handle_t input0, CK_ATTRIBUTE * input1,
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_FindObjectsInit(input0, input1, count);
 #else
@@ -930,6 +1062,7 @@ C_FindObjects(ck_session_handle_t input0, ck_object_handle_t * output2,
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_FindObjects(input0, output2, input1, output3);
 #else
@@ -943,6 +1076,7 @@ ck_rv_t C_FindObjectsFinal(ck_session_handle_t input0)
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_FindObjectsFinal(input0);
 #else
@@ -959,6 +1093,7 @@ C_GenerateKey(ck_session_handle_t input0, struct ck_mechanism * input1,
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_GenerateKey(input0, input1, input2, count, output3);
 #else
@@ -976,6 +1111,7 @@ C_GenerateKeyPair(ck_session_handle_t input0, struct ck_mechanism * input1,
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret =
       myC_GenerateKeyPair(input0, input1, input2, count, input3, count2,
@@ -995,6 +1131,7 @@ C_CreateObject(ck_session_handle_t input0, CK_ATTRIBUTE * input1,
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_CreateObject(input0, input1, count, output2);
 #else
@@ -1011,6 +1148,7 @@ C_CopyObject(ck_session_handle_t input0, ck_object_handle_t input1,
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_CopyObject(input0, input1, input2, count, output3);
 #else
@@ -1024,6 +1162,7 @@ ck_rv_t C_DestroyObject(ck_session_handle_t input0, ck_object_handle_t input1)
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_DestroyObject(input0, input1);
 #else
@@ -1039,6 +1178,7 @@ C_GetAttributeValue(ck_session_handle_t input0, ck_object_handle_t input1,
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_GetAttributeValue(input0, input1, input2, input3);
 #else
@@ -1054,6 +1194,7 @@ C_SetAttributeValue(ck_session_handle_t input0, ck_object_handle_t input1,
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_SetAttributeValue(input0, input1, input2, count);
 #else
@@ -1069,6 +1210,7 @@ C_GetObjectSize(ck_session_handle_t input0, ck_object_handle_t input1,
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_GetObjectSize(input0, input1, output2);
 #else
@@ -1085,6 +1227,7 @@ C_WrapKey(ck_session_handle_t input0, struct ck_mechanism * input1,
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_WrapKey(input0, input1, input2, input3, output4, output4_len);
 #else
@@ -1102,6 +1245,7 @@ C_UnwrapKey(ck_session_handle_t input0, struct ck_mechanism * input1,
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret =
       myC_UnwrapKey(input0, input1, input2, input3, input3_len, input4, count,
@@ -1122,6 +1266,7 @@ C_DeriveKey(ck_session_handle_t input0, struct ck_mechanism * input1,
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_DeriveKey(input0, input1, input2, input3, count, output4);
 #else
@@ -1135,6 +1280,7 @@ ck_rv_t C_DigestInit(ck_session_handle_t input0, struct ck_mechanism * input1)
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_DigestInit(input0, input1);
 #else
@@ -1151,6 +1297,7 @@ C_Digest(ck_session_handle_t input0, unsigned char *input1,
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_Digest(input0, input1, input1_len, output2, output2_len);
 #else
@@ -1166,6 +1313,7 @@ C_DigestUpdate(ck_session_handle_t input0, unsigned char *input1,
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_DigestUpdate(input0, input1, input1_len);
 #else
@@ -1181,6 +1329,7 @@ C_DigestFinal(ck_session_handle_t input0, unsigned char *output1,
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_DigestFinal(input0, output1, output1_len);
 #else
@@ -1194,6 +1343,7 @@ ck_rv_t C_DigestKey(ck_session_handle_t input0, ck_object_handle_t input1)
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_DigestKey(input0, input1);
 #else
@@ -1209,6 +1359,7 @@ C_SignInit(ck_session_handle_t input0, struct ck_mechanism * input1,
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_SignInit(input0, input1, input2);
 #else
@@ -1225,6 +1376,7 @@ C_Sign(ck_session_handle_t input0, unsigned char *input1,
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_Sign(input0, input1, input1_len, output2, output2_len);
 #else
@@ -1240,6 +1392,7 @@ C_SignUpdate(ck_session_handle_t input0, unsigned char *input1,
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_SignUpdate(input0, input1, input1_len);
 #else
@@ -1255,6 +1408,7 @@ C_SignFinal(ck_session_handle_t input0, unsigned char *output1,
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_SignFinal(input0, output1, output1_len);
 #else
@@ -1270,6 +1424,7 @@ C_SignRecoverInit(ck_session_handle_t input0, struct ck_mechanism * input1,
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_SignRecoverInit(input0, input1, input2);
 #else
@@ -1286,6 +1441,7 @@ C_SignRecover(ck_session_handle_t input0, unsigned char *input1,
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_SignRecover(input0, input1, input1_len, output2, output2_len);
 #else
@@ -1301,6 +1457,7 @@ C_VerifyRecoverInit(ck_session_handle_t input0, struct ck_mechanism * input1,
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_VerifyRecoverInit(input0, input1, input2);
 #else
@@ -1316,6 +1473,7 @@ C_VerifyInit(ck_session_handle_t input0, struct ck_mechanism * input1,
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_VerifyInit(input0, input1, input2);
 #else
@@ -1332,6 +1490,7 @@ C_Verify(ck_session_handle_t input0, unsigned char *input1,
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_Verify(input0, input1, input1_len, input2, input2_len);
 #else
@@ -1347,6 +1506,7 @@ C_VerifyUpdate(ck_session_handle_t input0, unsigned char *input1,
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_VerifyUpdate(input0, input1, input1_len);
 #else
@@ -1362,6 +1522,7 @@ C_VerifyFinal(ck_session_handle_t input0, unsigned char *input1,
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_VerifyFinal(input0, input1, input1_len);
 #else
@@ -1378,6 +1539,7 @@ C_VerifyRecover(ck_session_handle_t input0, unsigned char *input1,
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_VerifyRecover(input0, input1, input1_len, output2, output2_len);
 #else
@@ -1393,6 +1555,7 @@ C_EncryptInit(ck_session_handle_t input0, struct ck_mechanism * input1,
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_EncryptInit(input0, input1, input2);
 #else
@@ -1409,6 +1572,7 @@ C_Encrypt(ck_session_handle_t input0, unsigned char *input1,
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_Encrypt(input0, input1, input1_len, output2, output2_len);
 #else
@@ -1425,6 +1589,7 @@ C_EncryptUpdate(ck_session_handle_t input0, unsigned char *input1,
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_EncryptUpdate(input0, input1, input1_len, output2, output2_len);
 #else
@@ -1440,6 +1605,7 @@ C_EncryptFinal(ck_session_handle_t input0, unsigned char *output1,
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_EncryptFinal(input0, output1, output1_len);
 #else
@@ -1456,6 +1622,7 @@ C_DigestEncryptUpdate(ck_session_handle_t input0, unsigned char *input1,
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret =
       myC_DigestEncryptUpdate(input0, input1, input1_len, output2, output2_len);
@@ -1475,6 +1642,7 @@ C_SignEncryptUpdate(ck_session_handle_t input0, unsigned char *input1,
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_SignEncryptUpdate(input0, input1, input1_len, output2, output2_len);
 #else
@@ -1491,6 +1659,7 @@ C_DecryptInit(ck_session_handle_t input0, struct ck_mechanism * input1,
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_DecryptInit(input0, input1, input2);
 #else
@@ -1507,6 +1676,7 @@ C_Decrypt(ck_session_handle_t input0, unsigned char *input1,
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_Decrypt(input0, input1, input1_len, output2, output2_len);
 #else
@@ -1523,6 +1693,7 @@ C_DecryptUpdate(ck_session_handle_t input0, unsigned char *input1,
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_DecryptUpdate(input0, input1, input1_len, output2, output2_len);
 #else
@@ -1538,6 +1709,7 @@ C_DecryptFinal(ck_session_handle_t input0, unsigned char *output1,
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_DecryptFinal(input0, output1, output1_len);
 #else
@@ -1554,6 +1726,7 @@ C_DecryptDigestUpdate(ck_session_handle_t input0, unsigned char *input1,
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret =
       myC_DecryptDigestUpdate(input0, input1, input1_len, output2, output2_len);
@@ -1573,6 +1746,7 @@ C_DecryptVerifyUpdate(ck_session_handle_t input0, unsigned char *input1,
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret =
       myC_DecryptVerifyUpdate(input0, input1, input1_len, output2, output2_len);
@@ -1589,6 +1763,7 @@ ck_rv_t C_GetFunctionStatus(ck_session_handle_t input0)
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_GetFunctionStatus(input0);
 #else
@@ -1602,6 +1777,7 @@ ck_rv_t C_CancelFunction(ck_session_handle_t input0)
 {
   ck_rv_t ret;
   pthread_mutex_lock(&mutex);
+  check_pid;
 #ifdef CAMLRPC
   ret = myC_CancelFunction(input0);
 #else

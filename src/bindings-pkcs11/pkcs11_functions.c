@@ -80,7 +80,12 @@
     File:    src/bindings-pkcs11/pkcs11_functions.c
 
 -------------------------- CeCILL-B HEADER ----------------------------------*/
+#ifdef WIN32
+#include <windows.h>
+#include <fcntl.h>
+#else
 #include <dlfcn.h>
+#endif
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -172,11 +177,16 @@ CK_RV ML_CK_C_LoadModule( /*in */ const char *libname)
   CK_RV rv;
   DEBUG_CALL(ML_CK_C_LoadModule, " calling on %s\n", libname);
 
+#ifdef WIN32
+  module_handle = LoadLibrary(libname);
+#else
   module_handle = dlopen(libname, RTLD_NOW);
+#endif
   if (module_handle == NULL) {
 #ifdef DEBUG
     printf("ML_CK_C_LoadModule: Failed to dlopen(RTLD_NOW) module %s, trying RTLD_LAZY\n", libname);
 #endif
+#ifndef WIN32
     module_handle = dlopen(libname, RTLD_LAZY);
     if (module_handle == NULL) {
 #ifdef DEBUG
@@ -184,9 +194,16 @@ CK_RV ML_CK_C_LoadModule( /*in */ const char *libname)
 #endif
       return CKR_FUNCTION_FAILED;
     }
+#else
+    return CKR_FUNCTION_FAILED;
+#endif
   }
   /* Weird allocation for ANSI C compliance */
+#ifdef WIN32
+  *(void **)(&get_func_list) = (CK_C_GetFunctionList)GetProcAddress(module_handle, "C_GetFunctionList");
+#else
   *(void **)(&get_func_list) = dlsym(module_handle, "C_GetFunctionList");
+#endif
   if (get_func_list == NULL) {
 #ifdef DEBUG
     printf
@@ -236,11 +253,11 @@ CK_RV ML_CK_C_GetInfo( /*in */ CK_INFO_PTR info)
   /* Fill the output with default invalid values in case */
   /* the PKCS#11 call fails                              */
   if (info != NULL) {
-    info->cryptoki_version.major = info->cryptoki_version.minor = info->flags =
+    info->cryptokiVersion.major = info->cryptokiVersion.minor = info->flags =
 	0;
-    memset(info->manufacturer_id, 0, sizeof(info->manufacturer_id));
-    memset(info->library_description, 0, sizeof(info->library_description));
-    info->library_version.major = info->library_version.minor = 0;
+    memset(info->manufacturerID, 0, sizeof(info->manufacturerID));
+    memset(info->libraryDescription, 0, sizeof(info->libraryDescription));
+    info->libraryVersion.major = info->libraryVersion.minor = 0;
   }
 
   rv = pkcs11->C_GetInfo(info);
@@ -362,10 +379,10 @@ CK_RV ML_CK_C_GetSlotInfo( /*in */ CK_SLOT_ID slot_id,	/*out */
   /* the PKCS#11 call fails                              */
   if (info != NULL) {
     info->flags = 0;
-    memset(info->slot_description, 0, sizeof(info->slot_description));
-    memset(info->manufacturer_id, 0, sizeof(info->manufacturer_id));
-    info->hardware_version.major = info->hardware_version.minor = 0;
-    info->firmware_version.major = info->firmware_version.minor = 0;
+    memset(info->slotDescription, 0, sizeof(info->slotDescription));
+    memset(info->manufacturerID, 0, sizeof(info->manufacturerID));
+    info->hardwareVersion.major = info->hardwareVersion.minor = 0;
+    info->firmwareVersion.major = info->firmwareVersion.minor = 0;
   }
 
   rv = pkcs11->C_GetSlotInfo(slot_id, info);
@@ -390,17 +407,17 @@ CK_RV ML_CK_C_GetTokenInfo( /*in */ CK_SLOT_ID slot_id,	/*out */
   /* the PKCS#11 call fails                              */
   if (info != NULL) {
     memset(info->label, 0, sizeof(info->label));
-    memset(info->manufacturer_id, 0, sizeof(info->manufacturer_id));
+    memset(info->manufacturerID, 0, sizeof(info->manufacturerID));
     memset(info->model, 0, sizeof(info->model));
-    memset(info->serial_number, 0, sizeof(info->serial_number));
+    memset(info->serialNumber, 0, sizeof(info->serialNumber));
     info->flags = 0;
-    info->max_session_count = info->session_count = info->max_rw_session_count =
-	info->rw_session_count = info->max_pin_len = info->min_pin_len =
-	info->total_public_memory = info->free_public_memory =
-	info->total_private_memory = info->free_private_memory = 0;
-    memset(info->utc_time, 0, sizeof(info->utc_time));
-    info->hardware_version.major = info->hardware_version.minor = 0;
-    info->firmware_version.major = info->firmware_version.minor = 0;
+    info->ulMaxSessionCount = info->ulSessionCount = info->ulMaxRwSessionCount =
+    info->ulRwSessionCount = info->ulMaxPinLen = info->ulMinPinLen =
+    info->ulTotalPublicMemory = info->ulFreePublicMemory =
+    info->ulTotalPrivateMemory = info->ulFreePrivateMemory = 0;
+    memset(info->utcTime, 0, sizeof(info->utcTime));
+    info->hardwareVersion.major = info->hardwareVersion.minor = 0;
+    info->firmwareVersion.major = info->firmwareVersion.minor = 0;
   }
 
   DEBUG_CALL(ML_CK_C_GetTokenInfo, " called with slot_id = %ld\n", slot_id);
@@ -526,8 +543,8 @@ CK_RV ML_CK_C_GetSessionInfo( /*in */ CK_SESSION_HANDLE session,	/*out */
   /* Fill the output with default invalid values in case */
   /* the PKCS#11 call fails                              */
   if (session_info != NULL) {
-    session_info->slot_id = -1;
-    session_info->state = session_info->flags = session_info->device_error = 0;
+    session_info->slotID = -1;
+    session_info->state = session_info->flags = session_info->ulDeviceError = 0;
   }
 
   rv = pkcs11->C_GetSessionInfo(session, session_info);
@@ -657,7 +674,7 @@ CK_RV ML_CK_C_GetMechanismInfo( /*in */ CK_SLOT_ID slot_id,	/*in */
   /* Fill the output with default invalid values in case */
   /* the PKCS#11 call fails                              */
   if (mechanism_info != NULL) {
-    mechanism_info->min_key_size = mechanism_info->max_key_size =
+    mechanism_info->ulMinKeySize = mechanism_info->ulMaxKeySize =
 	mechanism_info->flags = 0;
   }
 
@@ -1273,7 +1290,7 @@ CK_RV ML_CK_C_SetAttributeValue( /*in */ CK_SESSION_HANDLE session,	/*in */
   /* Setting NULL_PTR when needed */
   for (i = 0UL; i < count; i++) {
     if (templ[i].ulValueLen == 0) {
-      printf("C_SetAttributeValue adding NULL_PTR to template\n");
+      DEBUG_CALL(ML_CK_C_SetAttributeValue, " adding NULL_PTR to template\n");
       templ[i].pValue = NULL_PTR;
     }
   }

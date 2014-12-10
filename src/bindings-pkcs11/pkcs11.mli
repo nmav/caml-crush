@@ -123,10 +123,19 @@ and ck_c_initialize_args = {
   ck_c_initialize_args_flags: ck_flags_t;
 }
 
+val lITTLE_ENDIAN_64  : nativeint
+val lITTLE_ENDIAN_32  : nativeint
+val bIG_ENDIAN_64  : nativeint
+val bIG_ENDIAN_32  : nativeint
+val uNSUPPORTED_ARCHITECTURE  : nativeint
+val nOT_INITIALIZED  : nativeint
+val match_arch_value : nativeint -> string
+
 val cRYPTOKI_VERSION_MAJOR  : nativeint
 val cRYPTOKI_VERSION_MINOR  : nativeint
 val cRYPTOKI_VERSION_REVISION : nativeint
 val cKN_SURRENDER : nativeint
+val cKN_OTP_CHANGED : nativeint
 val cKF_TOKEN_PRESENT : nativeint
 val cKF_REMOVABLE_DEVICE : nativeint
 val cKF_HW_SLOT  : nativeint
@@ -170,6 +179,7 @@ val cKO_SECRET_KEY  : nativeint
 val cKO_HW_FEATURE  : nativeint
 val cKO_DOMAIN_PARAMETERS : nativeint
 val cKO_MECHANISM  : nativeint
+val cKO_OTP_KEY : nativeint
 val cKO_VENDOR_DEFINED : nativeint
 val cKH_MONOTONIC_COUNTER : nativeint
 val cKH_CLOCK  : nativeint
@@ -200,11 +210,22 @@ val cKK_CDMF  : nativeint
 val cKK_AES   : nativeint
 val cKK_BLOWFISH  : nativeint
 val cKK_TWOFISH  : nativeint
+val cKK_SECURID  : nativeint
+val cKK_HOTP  : nativeint
+val cKK_ACTI  : nativeint
+val cKK_CAMELLIA  : nativeint
+val cKK_ARIA  : nativeint
 val cKK_VENDOR_DEFINED : nativeint
 val cKC_X_509  : nativeint
 val cKC_X_509_ATTR_CERT : nativeint
 val cKC_WTLS  : nativeint
 val cKC_VENDOR_DEFINED : nativeint
+val cK_OTP_FORMAT_DECIMAL   : nativeint
+val cK_OTP_FORMAT_HEXADECIMAL   : nativeint
+val cK_OTP_FORMAT_ALPHANUMERIC   : nativeint
+val cK_OTP_PARAM_IGNORED   : nativeint
+val cK_OTP_PARAM_OPTIONAL   : nativeint
+val cK_OTP_PARAM_MANDATORY   : nativeint
 val cKA_CLASS   : nativeint
 val cKA_TOKEN   : nativeint
 val cKA_PRIVATE   : nativeint
@@ -269,6 +290,20 @@ val cKA_SECONDARY_AUTH  : nativeint
 val cKA_AUTH_PIN_FLAGS  : nativeint
 val cKA_ALWAYS_AUTHENTICATE  : nativeint
 val cKA_WRAP_WITH_TRUSTED  : nativeint
+val cKA_OTP_FORMAT  : nativeint
+val cKA_OTP_LENGTH  : nativeint
+val cKA_OTP_TIME_INTERVAL  : nativeint
+val cKA_OTP_USER_FRIENDLY_MODE  : nativeint
+val cKA_OTP_CHALLENGE_REQUIREMENT  : nativeint
+val cKA_OTP_TIME_REQUIREMENT  : nativeint
+val cKA_OTP_COUNTER_REQUIREMENT  : nativeint
+val cKA_OTP_PIN_REQUIREMENT  : nativeint
+val cKA_OTP_COUNTER  : nativeint
+val cKA_OTP_TIME  : nativeint
+val cKA_OTP_USER_IDENTIFIER  : nativeint
+val cKA_OTP_SERVICE_IDENTIFIER  : nativeint
+val cKA_OTP_SERVICE_LOGO  : nativeint
+val cKA_OTP_SERVICE_LOGO_TYPE  : nativeint
 val cKA_HW_FEATURE_TYPE  : nativeint
 val cKA_RESET_ON_INIT  : nativeint
 val cKA_HAS_RESET   : nativeint
@@ -317,9 +352,11 @@ val cKM_X9_42_MQV_DERIVE  : nativeint
 val cKM_SHA256_RSA_PKCS  : nativeint
 val cKM_SHA384_RSA_PKCS  : nativeint
 val cKM_SHA512_RSA_PKCS  : nativeint
+val cKM_SHA224_RSA_PKCS  : nativeint
 val cKM_SHA256_RSA_PKCS_PSS  : nativeint
 val cKM_SHA384_RSA_PKCS_PSS  : nativeint
 val cKM_SHA512_RSA_PKCS_PSS  : nativeint
+val cKM_SHA224_RSA_PKCS_PSS  : nativeint
 val cKM_RC2_KEY_GEN   : nativeint
 val cKM_RC2_ECB   : nativeint
 val cKM_RC2_CBC   : nativeint
@@ -371,6 +408,15 @@ val cKM_SHA384_HMAC_GENERAL  : nativeint
 val cKM_SHA512   : nativeint
 val cKM_SHA512_HMAC   : nativeint
 val cKM_SHA512_HMAC_GENERAL  : nativeint
+val cKM_SHA224   : nativeint
+val cKM_SHA224_HMAC   : nativeint
+val cKM_SHA224_HMAC_GENERAL  : nativeint
+val cKM_SECURID_KEY_GEN  : nativeint
+val cKM_SECURID  : nativeint
+val cKM_HOTP_KEY_GEN  : nativeint
+val cKM_HOTP  : nativeint
+val cKM_ACTI_KEY_GEN  : nativeint
+val cKM_ACTI  : nativeint
 val cKM_CAST_KEY_GEN  : nativeint
 val cKM_CAST_ECB   : nativeint
 val cKM_CAST_CBC   : nativeint
@@ -421,11 +467,16 @@ val cKM_TLS_PRE_MASTER_KEY_GEN : nativeint
 val cKM_TLS_MASTER_KEY_DERIVE : nativeint
 val cKM_TLS_KEY_AND_MAC_DERIVE : nativeint
 val cKM_TLS_MASTER_KEY_DERIVE_DH : nativeint
+val cKM_TLS_PRF  : nativeint
 val cKM_SSL3_MD5_MAC  : nativeint
 val cKM_SSL3_SHA1_MAC  : nativeint
 val cKM_MD5_KEY_DERIVATION  : nativeint
 val cKM_MD2_KEY_DERIVATION  : nativeint
 val cKM_SHA1_KEY_DERIVATION  : nativeint
+val cKM_SHA256_KEY_DERIVATION  : nativeint
+val cKM_SHA384_KEY_DERIVATION  : nativeint
+val cKM_SHA512_KEY_DERIVATION  : nativeint
+val cKM_SHA224_KEY_DERIVATION  : nativeint
 val cKM_PBE_MD2_DES_CBC  : nativeint
 val cKM_PBE_MD5_DES_CBC  : nativeint
 val cKM_PBE_MD5_CAST_CBC  : nativeint
@@ -442,8 +493,35 @@ val cKM_PBE_SHA1_RC2_128_CBC : nativeint
 val cKM_PBE_SHA1_RC2_40_CBC  : nativeint
 val cKM_PKCS5_PBKD2   : nativeint
 val cKM_PBA_SHA1_WITH_SHA1_HMAC : nativeint
+val cKM_WTLS_PRE_MASTER_KEY_GEN : nativeint
+val cKM_WTLS_MASTER_KEY_DERIVE : nativeint
+val cKM_WTLS_MASTER_KEY_DERIVE_DH_ECC : nativeint
+val cKM_WTLS_PRF : nativeint
+val cKM_WTLS_SERVER_KEY_AND_MAC_DERIVE : nativeint
+val cKM_WTLS_CLIENT_KEY_AND_MAC_DERIVE : nativeint
 val cKM_KEY_WRAP_LYNKS  : nativeint
 val cKM_KEY_WRAP_SET_OAEP  : nativeint
+val cKM_CMS_SIG : nativeint
+val cKM_KIP_DERIVE : nativeint
+val cKM_KIP_WRAP : nativeint
+val cKM_KIP_MAC : nativeint
+val cKM_CAMELLIA_KEY_GEN : nativeint
+val cKM_CAMELLIA_ECB : nativeint
+val cKM_CAMELLIA_CBC : nativeint
+val cKM_CAMELLIA_MAC : nativeint
+val cKM_CAMELLIA_MAC_GENERAL : nativeint
+val cKM_CAMELLIA_CBC_PAD : nativeint
+val cKM_CAMELLIA_ECB_ENCRYPT_DATA : nativeint
+val cKM_CAMELLIA_CBC_ENCRYPT_DATA : nativeint
+val cKM_CAMELLIA_CTR : nativeint
+val cKM_ARIA_KEY_GEN : nativeint
+val cKM_ARIA_ECB : nativeint
+val cKM_ARIA_CBC : nativeint
+val cKM_ARIA_MAC : nativeint
+val cKM_ARIA_MAC_GENERAL : nativeint
+val cKM_ARIA_CBC_PAD : nativeint
+val cKM_ARIA_ECB_ENCRYPT_DATA : nativeint
+val cKM_ARIA_CBC_ENCRYPT_DATA : nativeint
 val cKM_SKIPJACK_KEY_GEN  : nativeint
 val cKM_SKIPJACK_ECB64  : nativeint
 val cKM_SKIPJACK_CBC64  : nativeint
@@ -485,6 +563,17 @@ val cKM_AES_CBC   : nativeint
 val cKM_AES_MAC   : nativeint
 val cKM_AES_MAC_GENERAL  : nativeint
 val cKM_AES_CBC_PAD   : nativeint
+val cKM_AES_CTR   : nativeint
+val cKM_BLOWFISH_KEY_GEN : nativeint
+val cKM_BLOWFISH_CBC : nativeint
+val cKM_TWOFISH_KEY_GEN : nativeint
+val cKM_TWOFISH_CBC : nativeint
+val cKM_DES_ECB_ENCRYPT_DATA : nativeint
+val cKM_DES_CBC_ENCRYPT_DATA : nativeint
+val cKM_DES3_ECB_ENCRYPT_DATA : nativeint
+val cKM_DES3_CBC_ENCRYPT_DATA : nativeint
+val cKM_AES_ECB_ENCRYPT_DATA : nativeint
+val cKM_AES_CBC_ENCRYPT_DATA : nativeint
 val cKM_DSA_PARAMETER_GEN  : nativeint
 val cKM_DH_PKCS_PARAMETER_GEN : nativeint
 val cKM_X9_42_DH_PARAMETER_GEN : nativeint
@@ -502,6 +591,12 @@ val cKF_GENERATE_KEY_PAIR : nativeint
 val cKF_WRAP  : nativeint
 val cKF_UNWRAP  : nativeint
 val cKF_DERIVE  : nativeint
+val cKF_EC_F_P  : nativeint
+val cKF_EC_F_2M  : nativeint
+val cKF_EC_ECPARAMETERS  : nativeint
+val cKF_EC_NAMEDCURVE  : nativeint
+val cKF_EC_UNCOMPRESS  : nativeint
+val cKF_EC_COMPRESS  : nativeint
 val cKF_EXTENSION  : nativeint
 val cKF_DONT_BLOCK    : nativeint
 val cKF_LIBRARY_CANT_CREATE_OS_THREADS : nativeint
@@ -590,6 +685,8 @@ val cKR_CRYPTOKI_NOT_INITIALIZED  : nativeint
 val cKR_CRYPTOKI_ALREADY_INITIALIZED : nativeint
 val cKR_MUTEX_BAD    : nativeint
 val cKR_MUTEX_NOT_LOCKED   : nativeint
+val cKR_NEW_PIN_MODE   : nativeint
+val cKR_NEXT_OTP   : nativeint
 val cKR_FUNCTION_REJECTED   : nativeint
 val cKR_VENDOR_DEFINED   : nativeint
 val cK_FALSE : nativeint
@@ -871,6 +968,12 @@ external int_to_ulong_char_array : nativeint -> char array
 
 external char_array_to_ulong : char array -> nativeint
 	= "camlidl_pkcs11_char_array_to_ulong"
+
+external hton_char_array : char array -> char array
+	= "camlidl_pkcs11_hton_char_array"
+
+external ntoh_char_array : char array -> char array
+	= "camlidl_pkcs11_ntoh_char_array"
 
 val c_Daemonize : char array -> ck_rv_t
 val c_SetupArch : nativeint -> ck_rv_t
